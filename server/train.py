@@ -1,18 +1,14 @@
 import json
 
 import PIL
-import argparse
 import time
 import thread
-import os
 import random
 import numpy as np
 from net import Q
 import chainer
 from chainer import functions as F
 from chainer import cuda, Variable, optimizers, serializers
-import sys
-from PyQt4.QtGui import QPixmap, QApplication
 from PIL import Image
 from agent import Agent
 
@@ -183,6 +179,7 @@ app = Flask(__name__)
 agent = Agent()
 thread.start_new_thread(target, (agent,))
 
+
 @app.route("/", methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -197,11 +194,10 @@ def index():
             print "image opened."
             agent.send_image(image)
             action = agent.receive_action()
-            print "action is " + str(action)
-            return json.dumps(action)
-        return '{}'
+            return str(action)
+        return '-'
     else:
-        return '{}'
+        return '-'
 
 if __name__ == "__main__":
-    app.run() #host='192.168.1.10')
+    app.run(host='192.168.1.10')

@@ -44,7 +44,7 @@ class Agent(object):
         self.play_event.wait()
         print "agent: action=" + str(self.action)
         self.play_event.clear()
-        return self.ACTIONS[self.action]
+        return self.action
 
     def process(self, image):
         pil = image.convert('L')

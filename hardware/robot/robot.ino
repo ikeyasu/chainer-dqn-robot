@@ -8,10 +8,6 @@
 #include <ESP8266WiFiMulti.h>
 #include <ESP8266HTTPClient.h>
 
-extern "C" {
-#include "libb64/cencode.h"
-}
-
 SoftwareSerial gCamSerial(12, 13, false, 256); //receivePin, transmitPin, inverse_logic, buffSize
 
 #define PIC_PKT_LEN    2048                  //data length of each read, dont set this too big because ram is limited
@@ -28,6 +24,17 @@ unsigned long gPicTotalLen = 0;  // picture length
 ESP8266WiFiMulti gWifiMulti;
 HTTPClient gHttp;
 
+char ACTION[9][2] = {
+       {-1, -1},
+       {-1,  0},
+       {-1,  1},
+       { 0, -1},
+       { 0,  0},
+       { 0,  1},
+       { 1, -1},
+       { 1,  0},
+       { 1,  1}};
+
 void setup()
 {
   Serial.begin(115200);
@@ -36,6 +43,7 @@ void setup()
   Serial.println("initialization done.");
   initCamera();
   gWifiMulti.addAP("F660A-gTbC-G", "a2QLYvUu");
+  gHttp.setReuse(true);
 
   Serial.print("wifi connecting ..");
   while ((gWifiMulti.run() != WL_CONNECTED)) {
@@ -63,7 +71,7 @@ void loop()
 
   Serial.println("Start to take a picture");
   capture();
-  getAndSendData(n);
+  char action = getAndSendData(n);
   Serial.print("Taking pictures success ,number : ");
   Serial.println(n);
   n++;
@@ -165,12 +173,13 @@ int skipLF(char in[], int len) {
   return len - skip;
 }
 
-void getAndSendData(int index) {
+char getAndSendData(int index) {
   unsigned int pktCnt = (gPicTotalLen) / (PIC_PKT_LEN - 6);
   if ((gPicTotalLen % (PIC_PKT_LEN - 6)) != 0) pktCnt += 1;
 
   char cmd[] = { 0xaa, 0x0e | gCameraAddr, 0x00, 0x00, 0x00, 0x00 };
   char pkt[PIC_PKT_LEN];
+  char result;
 
   gCamSerial.setTimeout(1000);
   for (unsigned int i = 0; i < pktCnt; i++) {
@@ -196,11 +205,18 @@ retry:
     sprintf(gURL + URL_LEN, "n=%d&last=%s", index, (i == pktCnt - 1) ? "y" : "n");
     gHttp.begin(gURL);
     int httpCode = gHttp.POST((uint8_t *) &pkt[4], cnt - 6);
+    if (httpCode == 200 && gHttp.getSize() == 1) {
+      String payload = gHttp.getString();
+      result = (payload == "-") ? -1 : payload.toInt();
+      Serial.print("getAndSendData: result=");
+      Serial.println(result, DEC);
+    }
     gHttp.end();
   }
   cmd[4] = 0xf0;
   cmd[5] = 0xf0;
   sendCmd(cmd, 6);
+  return result;
 }
 
 void sendCmd(char cmd[] , int cmd_len)
