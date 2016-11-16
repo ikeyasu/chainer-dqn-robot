@@ -115,7 +115,7 @@ def target(agent):
     try:
         thread.start_new_thread(train, ())
         next_clock = time.clock() + interval
-        save_iter = 10000
+        save_iter = 1000
         save_count = 0
         action = None
         action_q = q.copy()
@@ -153,12 +153,13 @@ def target(agent):
                     random_probability = min_random_probability
             else:
                 action = None
-                if save_iter <= 0:
-                    print 'save: ', save_count
-                    serializers.save_hdf5('{0}_{1:03d}.model'.format(args_output, save_count), q)
-                    serializers.save_hdf5('{0}_{1:03d}.state'.format(args_output, save_count), optimizer)
-                    save_iter = 10000
-                    save_count += 1
+
+            if save_iter <= 0:
+                print 'save: ', save_count
+                serializers.save_hdf5('{0}_{1:03d}.model'.format(args_output, save_count), q)
+                serializers.save_hdf5('{0}_{1:03d}.state'.format(args_output, save_count), optimizer)
+                save_iter = 10000
+                save_count += 1
             current_clock = time.clock()
             wait = next_clock - current_clock
             print 'wait: ', wait
