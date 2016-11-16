@@ -7,9 +7,11 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WiFiMulti.h>
 #include <ESP8266HTTPClient.h>
+#include <Wire.h>
 
 SoftwareSerial gCamSerial(12, 13, false, 256); //receivePin, transmitPin, inverse_logic, buffSize
 
+/**** camera *****/
 #define PIC_PKT_LEN    2048                  //data length of each read, dont set this too big because ram is limited
 #define PIC_FMT_VGA    7
 #define PIC_FMT_CIF    5
@@ -18,27 +20,45 @@ SoftwareSerial gCamSerial(12, 13, false, 256); //receivePin, transmitPin, invers
 #define PIC_FMT        PIC_FMT_OCIF
 const byte gCameraAddr = (CAM_ADDR << 5);  // addr
 
+/*** motor ***/
+#define MotorSpeedSet             0x82
+#define PWMFrequenceSet           0x84
+#define DirectionSet              0xaa
+#define MotorSetA                 0xa1
+#define MotorSetB                 0xa5
+#define Nothing                   0x01
+#define EnableStepper             0x1a
+#define UnenableStepper           0x1b
+#define Stepernu                  0x1c
+#define I2CMotorDriverAdd         0x0f   // Set the address of the I2CMotorDriver
+// set the steps you want, if 255, the stepper will rotate continuely;
+
+
+/*** others ***/
 char* gURL = "http://ikeuchis-air.localnet:5000/?????????????????????????????"; // need a buffer for URL query param
 #define URL_LEN 35
 unsigned long gPicTotalLen = 0;  // picture length
 ESP8266WiFiMulti gWifiMulti;
 HTTPClient gHttp;
 
-char ACTION[9][2] = {
-       {-1, -1},
-       {-1,  0},
-       {-1,  1},
-       { 0, -1},
-       { 0,  0},
-       { 0,  1},
-       { 1, -1},
-       { 1,  0},
-       { 1,  1}};
+char ACTIONS[9][2] = {
+       {-1, -1}, // 0
+       {-1,  0}, // 1
+       {-1,  1}, // 2
+       { 0, -1}, // 3
+       { 0,  0}, // 4
+       { 0,  1}, // 5
+       { 1, -1}, // 6
+       { 1,  0}, // 7
+       { 1,  1}};// 8
 
 void setup()
 {
   Serial.begin(115200);
   gCamSerial.begin(115200);
+  Wire.begin();
+  delayMicroseconds(10000);
+  MotorSpeedSetAB(0, 0);
 
   Serial.println("initialization done.");
   initCamera();
@@ -72,6 +92,7 @@ void loop()
   Serial.println("Start to take a picture");
   capture();
   char action = getAndSendData(n);
+  doAction(action);
   Serial.print("Taking pictures success ,number : ");
   Serial.println(n);
   n++;
@@ -219,8 +240,54 @@ retry:
   return result;
 }
 
-void sendCmd(char cmd[] , int cmd_len)
-{
+void sendCmd(char cmd[] , int cmd_len) {
   for (char i = 0; i < cmd_len; i++) gCamSerial.print(cmd[i]);
+}
+
+void doAction(char action) {
+  Serial.print("action=");
+  Serial.print(ACTIONS[action][0], DEC);
+  Serial.print(",");
+  Serial.println(ACTIONS[action][1], DEC);
+  MotorSpeedSetAB(ACTIONS[action][0] == 0 ? 0 : 30, ACTIONS[action][1] == 0 ? 0 : 30);
+  delay(10); //this delay needed
+  //"0b1010" defines the output polarity, "10" means the M+ is "positive" while the M- is "negtive"
+  unsigned char dir = ACTIONS[action][0] > 0 ? 0b10 : 0b01;
+  dir <<= 2;
+  dir |= ACTIONS[action][1] > 0 ? 0b10 : 0b01;
+  MotorDirectionSet(dir);
+  Serial.print("doAction: dir=0b");
+  Serial.println(dir, BIN);
+  delay(250);
+  MotorSpeedSetAB(0, 0);
+  delay(10); //this delay needed
+  MotorDirectionSet(0b0101);  //0b0101  Rotating in the opposite direction
+  Serial.println("doAction: motor stoped.");
+}
+
+void MotorSpeedSetAB(unsigned char MotorSpeedA , unsigned char MotorSpeedB)  {
+  MotorSpeedA=map(MotorSpeedA,0,100,0,255);
+  MotorSpeedB=map(MotorSpeedB,0,100,0,255);
+  Wire.beginTransmission(I2CMotorDriverAdd); // transmit to device I2CMotorDriverAdd
+  Wire.write(MotorSpeedSet);        // set pwm header
+  Wire.write(MotorSpeedA);              // send pwma
+  Wire.write(MotorSpeedB);              // send pwmb
+  Wire.endTransmission();    // stop transmittin
+}
+
+void MotorPWMFrequenceSet(unsigned char Frequence)  {
+  Wire.beginTransmission(I2CMotorDriverAdd); // transmit to device I2CMotorDriverAdd
+  Wire.write(PWMFrequenceSet);        // set frequence header
+  Wire.write(Frequence);              //  send frequence
+  Wire.write(Nothing);              //  need to send this byte as the third byte(no meaning)
+  Wire.endTransmission();    // stop transmitting
+}
+
+void MotorDirectionSet(unsigned char Direction)  {     //  Adjust the direction of the motors 0b0000 I4 I3 I2 I1
+  Wire.beginTransmission(I2CMotorDriverAdd); // transmit to device I2CMotorDriverAdd
+  Wire.write(DirectionSet);        // Direction control header
+  Wire.write(Direction);              // send direction control information
+  Wire.write(Nothing);              // need to send this byte as the third byte(no meaning)
+  Wire.endTransmission();    // stop transmitting
 }
 
