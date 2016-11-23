@@ -24,16 +24,17 @@ class Agent(object):
     def action_size(self):
         return len(self.ACTIONS)
 
-    def send_image(self, image):
+    def send_image_and_args(self, image, rear):
         print "agent: send image."
         self.image = image
+        self.rear = rear
         self.send_image_event.set()
 
-    def receive_image(self):
+    def receive_image_and_args(self):
         self.send_image_event.wait()
         print "agent: receive image."
         self.send_image_event.clear()
-        return self.image
+        return self.image, self.rear
 
     def send_action(self, action):
         print "agent: send action. action=" + str(action)
@@ -46,7 +47,9 @@ class Agent(object):
         self.play_event.clear()
         return self.action
 
-    def process(self, image):
+    def process(self, image, rear):
+        if int(rear) == 0:
+            return -800, False
         pil = image.convert('L')
         width, height = pil.size
         raw = pil.tobytes()

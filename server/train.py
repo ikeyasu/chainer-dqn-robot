@@ -124,8 +124,8 @@ def target(agent):
             if action is not None:
                 agent.send_action(action)
 
-            screen = agent.receive_image()
-            reward, terminal = agent.process(screen)
+            screen, rear = agent.receive_image_and_args()
+            reward, terminal = agent.process(screen, rear)
             if reward is not None:
                 train_image = xp.asarray(screen.resize((train_width, train_height))).astype(np.float32).transpose((2, 0, 1))
                 train_image = Variable(train_image.reshape((1,) + train_image.shape) / 127.5 - 1, volatile=True)
@@ -193,7 +193,7 @@ def index():
             print "sending image."
             image = PIL.Image.open(jpg)
             print "image opened."
-            agent.send_image(image)
+            agent.send_image_and_args(image, request.args['rear'])
             action = agent.receive_action()
             return str(action)
         return '-'
@@ -201,4 +201,4 @@ def index():
         return '-'
 
 if __name__ == "__main__":
-    app.run(host='192.168.1.10')
+    app.run()#host='192.168.1.10')
