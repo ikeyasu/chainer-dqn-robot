@@ -8,6 +8,7 @@
 #include <ESP8266WiFiMulti.h>
 #include <ESP8266HTTPClient.h>
 #include <Wire.h>
+#include "local_setting.h"
 
 SoftwareSerial gCamSerial(12, 13, false, 256); //receivePin, transmitPin, inverse_logic, buffSize
 
@@ -35,8 +36,8 @@ const byte gCameraAddr = (CAM_ADDR << 5);  // addr
 
 
 /*** others ***/
-char* gURL = "http://ikeuchis-air.localnet:5000/?????????????????????????????"; // need a buffer for URL query param
-#define URL_LEN 35
+char* gURL = "http://chainerdqnrobot.ddns.net:5000/?????????????????????????????"; // need a buffer for URL query param
+#define URL_LEN 38
 unsigned long gPicTotalLen = 0;  // picture length
 ESP8266WiFiMulti gWifiMulti;
 HTTPClient gHttp;
@@ -59,10 +60,10 @@ void setup()
   Wire.begin();
   delayMicroseconds(10000);
   MotorSpeedSetAB(0, 0);
-
+  pinMode(14, INPUT_PULLUP);
   Serial.println("initialization done.");
   initCamera();
-  gWifiMulti.addAP("F660A-gTbC-G", "a2QLYvUu");
+  gWifiMulti.addAP(WIFI_SSID, WIFI_PASS);
   gHttp.setReuse(true);
 
   Serial.print("wifi connecting ..");
@@ -200,7 +201,7 @@ char getAndSendData(int index) {
 
   char cmd[] = { 0xaa, 0x0e | gCameraAddr, 0x00, 0x00, 0x00, 0x00 };
   char pkt[PIC_PKT_LEN];
-  char result;
+  char result = 4; // 4 is default
 
   gCamSerial.setTimeout(1000);
   for (unsigned int i = 0; i < pktCnt; i++) {
@@ -222,10 +223,17 @@ retry:
       if (++retry_cnt < 100) goto retry;
       else break;
     }
-    int urlLen = 0; //strlen(URL);
-    sprintf(gURL + URL_LEN, "n=%d&last=%s", index, (i == pktCnt - 1) ? "y" : "n");
+    Serial.print("IO14=");
+    Serial.println(digitalRead(14));
+    sprintf(gURL + URL_LEN, "n=%d&last=%s&rear=%d",
+      index, (i == pktCnt - 1) ? "y" : "n",
+      digitalRead(14));
     gHttp.begin(gURL);
     int httpCode = gHttp.POST((uint8_t *) &pkt[4], cnt - 6);
+    Serial.print("getAndSendData: httpCode=");
+    Serial.print(httpCode, DEC);
+    Serial.print(" size=");
+    Serial.println(gHttp.getSize(), DEC);
     if (httpCode == 200 && gHttp.getSize() == 1) {
       String payload = gHttp.getString();
       result = (payload == "-") ? -1 : payload.toInt();
