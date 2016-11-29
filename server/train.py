@@ -1,33 +1,30 @@
-import json
-
-import PIL
 import time
 import thread
 import random
 import numpy as np
-from net import Q
 import chainer
 from chainer import functions as F
 from chainer import cuda, Variable, optimizers, serializers
-from PIL import Image
+from net import Q
 from agent import Agent
+
 
 latent_size = 256
 gamma = 0.99
 batch_size = 64
 
-args_gpu = -1 # GPU ID (negative value indicates CPU)
-args_input = None #input model file path without extension
-args_output = 'model/' # output model file path without extension
-args_interval = 100 # interval of capturing (ms)
-args_random = 0.2 # randomness of play
-args_pool_size = 50000 # number of frames of memory pool size
-args_random_reduction = 0.000002 # reduction rate of randomness
-args_min_random = 0.1 # minimum randomness of play
-args_train_term = 4 # training term size
-args_train_term_increase = 0.00002 # increase rate of training term size
-args_max_train_term = 32 # maximum training term size
-args_update_target_interval = 2000 # interval to update target Q function of Double DQN
+args_gpu = -1  # GPU ID (negative value indicates CPU)
+args_input = None  # input model file path without extension
+args_output = 'model/'  # output model file path without extension
+args_interval = 100  # interval of capturing (ms)
+args_random = 0.2  # randomness of play
+args_pool_size = 50000  # number of frames of memory pool size
+args_random_reduction = 0.000002  # reduction rate of randomness
+args_min_random = 0.1  # minimum randomness of play
+args_train_term = 4  # training term size
+args_train_term_increase = 0.00002  # increase rate of training term size
+args_max_train_term = 32  # maximum training term size
+args_update_target_interval = 2000  # interval to update target Q function of Double DQN
 
 interval = args_interval / 1000.0
 update_target_interval = args_update_target_interval
@@ -109,6 +106,7 @@ def train():
         current_term_size = min(current_term_size * term_increase_rate, max_term_size)
         print "current_term_size ", current_term_size
 
+
 def target(agent):
     print "started target thread."
     global frame, random_probability, average_reward
@@ -124,10 +122,11 @@ def target(agent):
             if action is not None:
                 agent.send_action(action)
 
-            screen, rear = agent.receive_image_and_args()
-            reward, terminal = agent.process(screen, rear)
+            screen = agent.receive_image()
+            reward, terminal = agent.process(screen)
             if reward is not None:
-                train_image = xp.asarray(screen.resize((train_width, train_height))).astype(np.float32).transpose((2, 0, 1))
+                train_image = xp.asarray(screen.resize((train_width, train_height))).astype(np.float32).transpose(
+                    (2, 0, 1))
                 train_image = Variable(train_image.reshape((1,) + train_image.shape) / 127.5 - 1, volatile=True)
                 score = action_q(train_image, train=False)
 
@@ -173,32 +172,9 @@ def target(agent):
     except KeyboardInterrupt:
         pass
 
-from flask import Flask
-from flask import request
-app = Flask(__name__)
 
 agent = Agent()
 thread.start_new_thread(target, (agent,))
 
-
-@app.route("/", methods=['GET', 'POST'])
-def index():
-    if request.method == 'POST':
-        print("image size: " + str(len(request.data)))
-        jpg = 'robot_images/img' + request.args['n'] + '.jpg'
-        outfile = open(jpg, 'ab')
-        outfile.write(request.data)
-        outfile.close()
-        if request.args['last'] == 'y':
-            print "sending image."
-            image = PIL.Image.open(jpg)
-            print "image opened."
-            agent.send_image_and_args(image, request.args['rear'])
-            action = agent.receive_action()
-            return str(action)
-        return '-'
-    else:
-        return '-'
-
 if __name__ == "__main__":
-    app.run()#host='192.168.1.10')
+    agent.loop_forever()
