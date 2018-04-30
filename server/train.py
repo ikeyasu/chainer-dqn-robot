@@ -107,74 +107,74 @@ def train():
         print "current_term_size ", current_term_size
 
 
-def target(agent):
+def loop(agent):
     print "started target thread."
     global frame, random_probability, average_reward
-    try:
-        thread.start_new_thread(train, ())
-        next_clock = time.clock() + interval
-        save_iter = 1000
-        save_count = 0
-        action = None
-        action_q = q.copy()
-        action_q.reset_state()
-        while True:
-            if action is not None:
-                agent.send_action(action)
+    thread.start_new_thread(train, ())
+    next_clock = time.clock() + interval
+    save_iter = 1000
+    save_count = 0
+    action = None
+    action_q = q.copy()
+    action_q.reset_state()
+    while True:
+        if action is not None:
+            agent.send_action(action)
 
-            screen = agent.receive_image()
-            reward, terminal = agent.process(screen)
-            if reward is not None:
-                train_image = xp.asarray(screen.resize((train_width, train_height))).astype(np.float32).transpose(
-                    (2, 0, 1))
-                train_image = Variable(train_image.reshape((1,) + train_image.shape) / 127.5 - 1, volatile=True)
-                score = action_q(train_image, train=False)
+        screen = agent.receive_image()
+        reward, terminal = agent.process(screen)
+        if reward is not None:
+            screen = screen.resize((train_width, train_height))
+            screen_ary = xp.asarray(screen)
+            if len(screen_ary[0][0]) == 4:
+                screen_ary = np.delete(screen_ary, 3, 2)
+            elif len(screen_ary[0][0] != 3):
+                raise Exception("invalid image size")
+            train_image = screen_ary.astype(np.float32).transpose((2, 0, 1))
+            train_image = Variable(train_image.reshape((1,) + train_image.shape) / 127.5 - 1, volatile=True)
+            score = action_q(train_image, train=False)
 
-                best = int(np.argmax(score.data))
-                action = agent.randomize_action(best, random_probability)
-                print action, float(score.data[0][action]), best, float(score.data[0][best]), reward
-                index = frame % POOL_SIZE
-                state_pool[index] = cuda.to_cpu(train_image.data)
-                action_pool[index] = action
-                reward_pool[index - 1] = reward
-                average_reward = average_reward * 0.9999 + reward * 0.0001
-                print "average reward: ", average_reward
-                if terminal:
-                    terminal_pool[index - 1] = 1
-                    action_q = q.copy()
-                    action_q.reset_state()
-                else:
-                    terminal_pool[index - 1] = 0
-                frame += 1
-                save_iter -= 1
-                random_probability *= random_reduction_rate
-                if random_probability < min_random_probability:
-                    random_probability = min_random_probability
+            best = int(np.argmax(score.data))
+            action = agent.randomize_action(best, random_probability)
+            print action, float(score.data[0][action]), best, float(score.data[0][best]), reward
+            index = frame % POOL_SIZE
+            state_pool[index] = cuda.to_cpu(train_image.data)
+            action_pool[index] = action
+            reward_pool[index - 1] = reward
+            average_reward = average_reward * 0.9999 + reward * 0.0001
+            print "average reward: ", average_reward
+            if terminal:
+                terminal_pool[index - 1] = 1
+                action_q = q.copy()
+                action_q.reset_state()
             else:
-                action = None
+                terminal_pool[index - 1] = 0
+            frame += 1
+            save_iter -= 1
+            random_probability *= random_reduction_rate
+            if random_probability < min_random_probability:
+                random_probability = min_random_probability
+        else:
+            action = None
 
-            if save_iter <= 0:
-                print 'save: ', save_count
-                serializers.save_hdf5('{0}_{1:03d}.model'.format(args_output, save_count), q)
-                serializers.save_hdf5('{0}_{1:03d}.state'.format(args_output, save_count), optimizer)
-                save_iter = 10000
-                save_count += 1
-            current_clock = time.clock()
-            wait = next_clock - current_clock
-            print 'wait: ', wait
-            if wait > 0:
-                next_clock += interval
-                time.sleep(wait)
-            elif wait > -interval / 2:
-                next_clock += interval
-            else:
-                next_clock = current_clock + interval
-    except KeyboardInterrupt:
-        pass
+        if save_iter <= 0:
+            print 'save: ', save_count
+            serializers.save_hdf5('{0}_{1:03d}.model'.format(args_output, save_count), q)
+            serializers.save_hdf5('{0}_{1:03d}.state'.format(args_output, save_count), optimizer)
+            save_iter = 10000
+            save_count += 1
+        current_clock = time.clock()
+        wait = next_clock - current_clock
+        print 'wait: ', wait
+        if wait > 0:
+            next_clock += interval
+            time.sleep(wait)
+        elif wait > -interval / 2:
+            next_clock += interval
+        else:
+            next_clock = current_clock + interval
 
-
-agent = Agent()
-thread.start_new_thread(target, (agent,))
 
 if __name__ == "__main__":
-    agent.loop_forever()
+    agent = Agent()
+    loop(agent)

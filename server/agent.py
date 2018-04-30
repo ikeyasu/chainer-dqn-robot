@@ -1,12 +1,16 @@
+from __future__ import print_function
+from __future__ import print_function
+
+import base64
+import json
 import random
-import thread
 import PIL
+import cStringIO
 import numpy as np
-import threading
 import zbar
-import paho.mqtt.client as mqtt
-from flask import Flask
-from flask import request
+import six.moves.queue as queue
+
+import utils
 
 
 class AbstractAgent(object):
@@ -14,6 +18,9 @@ class AbstractAgent(object):
 
     def __init__(self):
         pass
+
+    def action_size(self):
+        return len(self.ACTIONS)
 
     def process(self, image):
         return 100, True
@@ -27,105 +34,84 @@ class AbstractAgent(object):
 class Agent(AbstractAgent):
     USE_HTTP_SERVER = False
 
-    def __init__(self, host='127.0.0.1'):
-        self.send_image_event = threading.Event()
-        self.play_event = threading.Event()
+    def __init__(self):
+        super(Agent, self).__init__()
         self.image = None
         self.action = None
-        self.host = host
+        self.reward = None
+        self.termination = None
+        self.reply_queue = queue.Queue()
 
         self.scanner = zbar.ImageScanner()
         self.scanner.parse_config('enable')
 
-        self.mqtt_client = self.connect_mqtt_server_(host)
+        self.mqtt_client = utils.connect_mqtt_server()
+        self.mqtt_client.message_callback_add("/robot", lambda c, u, m: self._on_message(c, u, m))
+        self.mqtt_client.loop_start()
 
-    def loop_forever(self):
-        thread.start_new_thread(self.run_http_server_, (self.host,))
-        self.mqtt_client.loop_forever()
-
-    @staticmethod
-    def connect_mqtt_server_(host):
-        def on_connect(client, userdata, flags, respons_code):
-            client.subscribe("/robot")
-            print('status {0}'.format(respons_code))
-
-        def on_message(client, userdata, msg):
-            print(msg.topic + ' ' + str(msg.payload))
-
-        mqtt_client = mqtt.Client(protocol=mqtt.MQTTv311)
-        mqtt_client.on_connect = on_connect
-        mqtt_client.on_message = on_message
-        mqtt_client.connect(host, port=1883, keepalive=60)
-        return mqtt_client
-
-    def run_http_server_(self, host):
-        app = Flask(__name__)
-
-        @app.route("/", methods=['GET', 'POST'])
-        def index():
-            if request.method == 'POST':
-                print("image size: " + str(len(request.data)))
-                jpg = 'robot_images/img' + request.args['n'] + '.jpg'
-                print 1
-                outfile = open(jpg, 'ab')
-                print 2
-                outfile.write(request.data)
-                print 3
-                outfile.close()
-                print 4
-                if request.args['last'] == 'y':
-                    print "sending image."
-                    image = PIL.Image.open(jpg)
-                    print "image opened."
-                    self.send_image(image)
-                    action = self.receive_action()
-                    return str(action)
-                return '-'
-            else:
-                return '-'
-
-        app.run(host)
-
-    def get_events(self):
-        return self.send_image_event, self.play_event
-
-    def action_size(self):
-        return len(self.ACTIONS)
-
-    def send_image(self, image):
-        print "agent: send image."
-        self.image = image
-        self.send_image_event.set()
+    def _on_message(self, client, userdata, msg):
+        msg = json.loads(msg.payload)
+        q = self.reply_queue.get()
+        if msg["command"] == "reply" and msg["source"]["command"] == q["command"]:
+            if q.has_key("_callback"):
+                q["_callback"](msg)
+            self.reply_queue.task_done()
+        else:
+            self.reply_queue.put(q)
+            self.reply_queue.task_done()
 
     def receive_image(self):
-        self.send_image_event.wait()
-        print "agent: receive image."
-        self.send_image_event.clear()
+        def _callback(msg):
+            image_string = cStringIO.StringIO(base64.b64decode(msg["image"]))
+            self.image = PIL.Image.open(image_string)
+
+        obj = {
+            "command": "request-image"
+        }
+        self.mqtt_client.publish("/robot", json.dumps(obj))
+        obj["_callback"] = _callback
+        self.reply_queue.put(obj)
+        self.reply_queue.join()
+        print("agent: receive image.")
         return self.image
 
     def send_action(self, action):
-        print "agent: send action. action=" + str(action)
+        print("agent: send action. action=" + str(action))
+        obj = {
+            "command": "action",
+            "action": action
+        }
+        self.mqtt_client.publish("/robot", json.dumps(obj))
+        self.reply_queue.put(obj)
+        self.reply_queue.join()
         self.action = action
-        self.play_event.set()
-
-    def receive_action(self):
-        self.play_event.wait()
-        print "agent: action=" + str(self.action)
-        self.play_event.clear()
-        return self.action
 
     def process(self, image):
-        pil = image.convert('L')
-        width, height = pil.size
-        raw = pil.tobytes()
-        image = zbar.Image(width, height, 'Y800', raw)
-        self.scanner.scan(image)
-        if len(image.symbols) > 0:
-            print "agent: reword=100"
-            return 100, True
-        else:
-            print "agent: reword=-100"
-            return -100, False
+
+        def _callback(msg):
+            self.reward = msg["reward"]
+            self.termination = msg["termination"]
+
+        obj = {
+            "command": "request-reward"
+        }
+        self.mqtt_client.publish("/robot", json.dumps(obj))
+        obj["_callback"] = _callback
+        self.reply_queue.put(obj)
+        self.reply_queue.join()
+        print("agent: receive reward: reward=" + str(self.reward) + " termination=" + str(self.termination))
+        return self.reward, self.termination
+        # pil = image.convert('L')
+        # width, height = pil.size
+        # raw = pil.tobytes()
+        # image = zbar.Image(width, height, 'Y800', raw)
+        # self.scanner.scan(image)
+        # if len(image.symbols) > 0:
+        #    print "agent: reword=100"
+        #    return 100, True
+        # else:
+        #    print "agent: reword=-100"
+        #    return -100, False
 
     def randomize_action(self, action, random_probability):
         if random.random() < random_probability:
